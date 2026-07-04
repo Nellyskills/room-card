@@ -16,6 +16,7 @@ const TRANSLATIONS = {
     editor_type: "Typ",
     editor_type_light: "Licht",
     editor_type_cover: "Vorhang",
+    editor_type_door: "Tür/Fenster",
     editor_entity: "Entität",
     editor_icon_label: "Icon",
     editor_icon_open: "Icon (geöffnet)",
@@ -24,6 +25,7 @@ const TRANSLATIONS = {
     editor_no_entities: "Noch keine Schnellzugriffe hinzugefügt.",
     editor_reorder: "Zum Sortieren ziehen",
     editor_temperature: "Temperatursensor (optional)",
+    editor_entity_nav_path: "Navigationspfad (optional)",
   },
   en: {
     editor_icon: "Icon",
@@ -34,6 +36,7 @@ const TRANSLATIONS = {
     editor_type: "Type",
     editor_type_light: "Light",
     editor_type_cover: "Cover",
+    editor_type_door: "Door/Window",
     editor_entity: "Entity",
     editor_icon_label: "Icon",
     editor_icon_open: "Icon (open)",
@@ -42,6 +45,7 @@ const TRANSLATIONS = {
     editor_no_entities: "No quick actions added yet.",
     editor_reorder: "Drag to reorder",
     editor_temperature: "Temperature sensor (optional)",
+    editor_entity_nav_path: "Navigation path (optional)",
   },
 };
 
@@ -161,9 +165,10 @@ class RoomCard extends HTMLElement {
     this._update();
   }
 
-  _navigate() {
-    if (!this._config.navigation_path) return;
-    history.pushState(null, "", this._config.navigation_path);
+  _navigate(path) {
+    const target = path || this._config.navigation_path;
+    if (!target) return;
+    history.pushState(null, "", target);
     fireEvent(window, "location-changed", { replace: false });
   }
 
@@ -171,6 +176,12 @@ class RoomCard extends HTMLElement {
     if (!cfg.entity || !this._hass || !this._hass.states[cfg.entity]) return;
     if (cfg.type === "cover") {
       this._openMoreInfo(cfg.entity);
+    } else if (cfg.type === "door") {
+      if (cfg.navigation_path) {
+        this._navigate(cfg.navigation_path);
+      } else {
+        this._openMoreInfo(cfg.entity);
+      }
     } else {
       this._toggle(cfg.entity);
     }
@@ -207,12 +218,16 @@ class RoomCard extends HTMLElement {
 
     this._buttons.forEach(({ btn, icon, cfg }) => {
       const stateObj = this._hass.states[cfg.entity];
-      btn.classList.remove("on", "off", "unavailable", "cover-open");
+      btn.classList.remove("on", "off", "unavailable", "cover-open", "door-open", "door-closed");
 
       if (!stateObj || stateObj.state === "unavailable" || stateObj.state === "unknown") {
         icon.setAttribute(
           "icon",
-          cfg.type === "cover" ? cfg.icon_open || "mdi:curtains" : cfg.icon || "mdi:lightbulb"
+          cfg.type === "cover"
+            ? cfg.icon_open || "mdi:curtains"
+            : cfg.type === "door"
+              ? cfg.icon_open || "mdi:door-open"
+              : cfg.icon || "mdi:lightbulb"
         );
         btn.classList.add("unavailable");
         btn.disabled = true;
@@ -224,6 +239,10 @@ class RoomCard extends HTMLElement {
         const isClosed = stateObj.state === "closed";
         icon.setAttribute("icon", isClosed ? cfg.icon_closed || "mdi:curtains-closed" : cfg.icon_open || "mdi:curtains");
         btn.classList.add(isClosed ? "off" : "cover-open");
+      } else if (cfg.type === "door") {
+        const isOpen = stateObj.state === "on";
+        icon.setAttribute("icon", isOpen ? cfg.icon_open || "mdi:door-open" : cfg.icon_closed || "mdi:door-closed");
+        btn.classList.add(isOpen ? "door-open" : "door-closed");
       } else {
         icon.setAttribute("icon", cfg.icon || "mdi:lightbulb");
         btn.classList.add(stateObj.state === "on" ? "on" : "off");
@@ -314,6 +333,12 @@ class RoomCard extends HTMLElement {
       }
       .ent-btn.cover-open ha-icon {
         color: rgba(33, 150, 243, 0.95);
+      }
+      .ent-btn.door-closed ha-icon {
+        color: rgba(76, 175, 80, 0.95);
+      }
+      .ent-btn.door-open ha-icon {
+        color: rgba(233, 30, 99, 0.9);
       }
       .ent-btn.unavailable {
         opacity: 0.45;
@@ -503,19 +528,30 @@ class RoomCardEditor extends HTMLElement {
       const optCover = document.createElement("option");
       optCover.value = "cover";
       optCover.textContent = t(this._hass, "editor_type_cover");
+      const optDoor = document.createElement("option");
+      optDoor.value = "door";
+      optDoor.textContent = t(this._hass, "editor_type_door");
       typeSelect.appendChild(optLight);
       typeSelect.appendChild(optCover);
+      typeSelect.appendChild(optDoor);
       typeSelect.value = entCfg.type;
       typeSelect.addEventListener("keydown", (e) => e.stopPropagation());
       typeSelect.addEventListener("change", (e) => {
         entCfg.type = e.target.value;
         if (entCfg.type === "cover") {
           delete entCfg.icon;
+          delete entCfg.navigation_path;
           entCfg.icon_open = entCfg.icon_open || "mdi:curtains";
           entCfg.icon_closed = entCfg.icon_closed || "mdi:curtains-closed";
+        } else if (entCfg.type === "door") {
+          delete entCfg.icon;
+          entCfg.icon_open = entCfg.icon_open || "mdi:door-open";
+          entCfg.icon_closed = entCfg.icon_closed || "mdi:door-closed";
+          entCfg.navigation_path = entCfg.navigation_path || "";
         } else {
           delete entCfg.icon_open;
           delete entCfg.icon_closed;
+          delete entCfg.navigation_path;
           entCfg.icon = entCfg.icon || "mdi:lightbulb";
         }
         entCfg.entity = "";
@@ -539,7 +575,14 @@ class RoomCardEditor extends HTMLElement {
       const entityPicker = document.createElement("ha-entity-picker");
       entityPicker.hass = this._hass;
       entityPicker.value = entCfg.entity || "";
-      entityPicker.includeDomains = entCfg.type === "cover" ? ["cover"] : ["light", "switch"];
+      if (entCfg.type === "cover") {
+        entityPicker.includeDomains = ["cover"];
+      } else if (entCfg.type === "door") {
+        entityPicker.includeDomains = ["binary_sensor"];
+        entityPicker.includeDeviceClasses = ["door", "window", "garage_door", "opening"];
+      } else {
+        entityPicker.includeDomains = ["light", "switch"];
+      }
       entityPicker.classList.add("entity-picker");
       entityPicker.addEventListener("value-changed", (e) => {
         entCfg.entity = e.detail.value;
@@ -562,14 +605,17 @@ class RoomCardEditor extends HTMLElement {
       dragHandle.appendChild(dragIcon);
       iconsRow.appendChild(dragHandle);
 
-      if (entCfg.type === "cover") {
+      if (entCfg.type === "cover" || entCfg.type === "door") {
+        const defaultOpen = entCfg.type === "cover" ? "mdi:curtains" : "mdi:door-open";
+        const defaultClosed = entCfg.type === "cover" ? "mdi:curtains-closed" : "mdi:door-closed";
+
         const openGroup = document.createElement("div");
         openGroup.className = "icon-group";
         const openLabel = document.createElement("label");
         openLabel.textContent = t(this._hass, "editor_icon_open");
         const iconOpenPicker = document.createElement("ha-icon-picker");
         iconOpenPicker.hass = this._hass;
-        iconOpenPicker.value = entCfg.icon_open || "mdi:curtains";
+        iconOpenPicker.value = entCfg.icon_open || defaultOpen;
         iconOpenPicker.classList.add("icon-picker");
         iconOpenPicker.addEventListener("value-changed", (e) => {
           entCfg.icon_open = e.detail.value;
@@ -584,7 +630,7 @@ class RoomCardEditor extends HTMLElement {
         closedLabel.textContent = t(this._hass, "editor_icon_closed");
         const iconClosedPicker = document.createElement("ha-icon-picker");
         iconClosedPicker.hass = this._hass;
-        iconClosedPicker.value = entCfg.icon_closed || "mdi:curtains-closed";
+        iconClosedPicker.value = entCfg.icon_closed || defaultClosed;
         iconClosedPicker.classList.add("icon-picker");
         iconClosedPicker.addEventListener("value-changed", (e) => {
           entCfg.icon_closed = e.detail.value;
@@ -614,6 +660,23 @@ class RoomCardEditor extends HTMLElement {
       }
 
       item.appendChild(iconsRow);
+
+      if (entCfg.type === "door") {
+        const navRow = document.createElement("div");
+        navRow.className = "ent-nav-row";
+        const navField = this._createTextField(
+          t(this._hass, "editor_entity_nav_path"),
+          entCfg.navigation_path || "",
+          (value) => {
+            entCfg.navigation_path = value;
+            this._fire();
+          }
+        );
+        navField.wrap.classList.add("compact-field");
+        navRow.appendChild(navField.wrap);
+        item.appendChild(navRow);
+      }
+
       this._list.appendChild(item);
       this._makeDraggable(item, dragHandle);
     });
@@ -798,6 +861,13 @@ class RoomCardEditor extends HTMLElement {
         gap: 10px;
         margin-top: 8px;
       }
+      .ent-nav-row {
+        padding-left: 82px;
+        margin-top: 4px;
+      }
+      .ent-nav-row .compact-field {
+        margin-top: 0;
+      }
       .drag-handle {
         flex: 0 0 72px;
         display: flex;
@@ -886,7 +956,7 @@ customElements.define("room-card-editor", RoomCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "room-card",
-  name: "Nellyskills Room Card",
+  name: "Room Card",
   description: "Kompakte Raum-Karte mit Icon, Name und Schnellzugriff-Buttons für Lichter.",
   preview: true,
 });
