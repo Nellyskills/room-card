@@ -956,7 +956,7 @@ customElements.define("room-card-editor", RoomCardEditor);
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "room-card",
-  name: "Room Card",
+  name: "Nellyskills Room Card",
   description: "Kompakte Raum-Karte mit Icon, Name und Schnellzugriff-Buttons für Lichter.",
   preview: true,
 });
