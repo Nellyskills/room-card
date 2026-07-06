@@ -4,7 +4,7 @@ A compact Home Assistant Lovelace card for room overviews — icon, name, option
 
 ## Screenshots
 
-### Room with light and temperature
+### Rooms with light, curtain, door and temperature
 ![Room Card – Light and Temperature](room-card.png)
 
 ## Features
