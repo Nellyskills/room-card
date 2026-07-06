@@ -26,6 +26,13 @@ const TRANSLATIONS = {
     editor_reorder: "Zum Sortieren ziehen",
     editor_temperature: "Temperatursensor (optional)",
     editor_entity_nav_path: "Navigationspfad (optional)",
+    state_open: "Geöffnet",
+    state_closed: "Geschlossen",
+    state_opening: "Öffnet...",
+    state_closing: "Schließt...",
+    action_open: "Öffnen",
+    action_stop: "Stopp",
+    action_close: "Schließen",
   },
   en: {
     editor_icon: "Icon",
@@ -46,6 +53,13 @@ const TRANSLATIONS = {
     editor_reorder: "Drag to reorder",
     editor_temperature: "Temperature sensor (optional)",
     editor_entity_nav_path: "Navigation path (optional)",
+    state_open: "Open",
+    state_closed: "Closed",
+    state_opening: "Opening...",
+    state_closing: "Closing...",
+    action_open: "Open",
+    action_stop: "Stop",
+    action_close: "Close",
   },
 };
 
@@ -175,7 +189,7 @@ class RoomCard extends HTMLElement {
   _handleClick(cfg) {
     if (!cfg.entity || !this._hass || !this._hass.states[cfg.entity]) return;
     if (cfg.type === "cover") {
-      this._openMoreInfo(cfg.entity);
+      this._openCoverPopup(cfg);
     } else if (cfg.type === "door") {
       if (cfg.navigation_path) {
         this._navigate(cfg.navigation_path);
@@ -191,6 +205,78 @@ class RoomCard extends HTMLElement {
     fireEvent(this, "hass-more-info", { entityId });
   }
 
+  _openCoverPopup(cfg) {
+    if (!this._hass) return;
+    this._popupEntity = cfg.entity;
+    if (!this._popupEl) this._buildPopup();
+    this._updatePopup();
+    this._popupEl.classList.add("open");
+  }
+
+  _closePopup() {
+    if (this._popupEl) this._popupEl.classList.remove("open");
+    this._popupEntity = null;
+  }
+
+  _buildPopup() {
+    const overlay = document.createElement("div");
+    overlay.className = "popup-overlay";
+    overlay.innerHTML = `
+      <div class="popup-card">
+        <div class="popup-header">
+          <ha-icon class="popup-icon"></ha-icon>
+          <span class="popup-title"></span>
+          <button class="popup-close-x" type="button"><ha-icon icon="mdi:close"></ha-icon></button>
+        </div>
+        <div class="popup-state"></div>
+        <div class="popup-controls">
+          <button class="popup-btn popup-open" type="button"><ha-icon icon="mdi:arrow-expand-horizontal"></ha-icon></button>
+          <button class="popup-btn popup-stop" type="button"><ha-icon icon="mdi:stop"></ha-icon></button>
+          <button class="popup-btn popup-close-cover" type="button"><ha-icon icon="mdi:arrow-collapse-horizontal"></ha-icon></button>
+        </div>
+      </div>
+    `;
+    overlay.addEventListener("click", (e) => {
+      if (e.target === overlay) this._closePopup();
+    });
+    overlay.querySelector(".popup-close-x").addEventListener("click", () => this._closePopup());
+    overlay.querySelector(".popup-open").addEventListener("click", () => {
+      if (this._popupEntity) this._hass.callService("cover", "open_cover", { entity_id: this._popupEntity });
+    });
+    overlay.querySelector(".popup-stop").addEventListener("click", () => {
+      if (this._popupEntity) this._hass.callService("cover", "stop_cover", { entity_id: this._popupEntity });
+    });
+    overlay.querySelector(".popup-close-cover").addEventListener("click", () => {
+      if (this._popupEntity) this._hass.callService("cover", "close_cover", { entity_id: this._popupEntity });
+    });
+    this.shadowRoot.querySelector("ha-card").appendChild(overlay);
+    this._popupEl = overlay;
+  }
+
+  _updatePopup() {
+    if (!this._popupEl || !this._popupEntity || !this._hass) return;
+    const stateObj = this._hass.states[this._popupEntity];
+    if (!stateObj) return;
+    const cfg = (this._config.entities || []).find((e) => e.entity === this._popupEntity) || {};
+    const isClosed = stateObj.state === "closed";
+    const icon = isClosed ? cfg.icon_closed || "mdi:curtains-closed" : cfg.icon_open || "mdi:curtains";
+    this._popupEl.querySelector(".popup-icon").setAttribute("icon", icon);
+    this._popupEl.querySelector(".popup-title").textContent =
+      stateObj.attributes.friendly_name || this._popupEntity;
+
+    const stateKeyMap = {
+      open: "state_open",
+      closed: "state_closed",
+      opening: "state_opening",
+      closing: "state_closing",
+    };
+    let stateText = t(this._hass, stateKeyMap[stateObj.state] || null) || stateObj.state;
+    if (stateObj.attributes.current_position !== undefined) {
+      stateText += ` · ${stateObj.attributes.current_position}%`;
+    }
+    this._popupEl.querySelector(".popup-state").textContent = stateText;
+  }
+
   _toggle(entityId) {
     if (!entityId || !this._hass || !this._hass.states[entityId]) return;
     const domain = entityId.split(".")[0];
@@ -202,6 +288,10 @@ class RoomCard extends HTMLElement {
 
     this._mainIcon.setAttribute("icon", this._config.icon);
     this._mainName.textContent = this._config.name;
+
+    if (this._popupEntity) {
+      this._updatePopup();
+    }
 
     if (this._config.temperature_entity) {
       const tempState = this._hass.states[this._config.temperature_entity];
@@ -346,6 +436,88 @@ class RoomCard extends HTMLElement {
       }
       .ent-btn.unavailable ha-icon {
         color: rgba(255, 80, 80, 0.9);
+      }
+      .popup-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.15s ease;
+      }
+      .popup-overlay.open {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .popup-card {
+        background: var(--ha-card-background, var(--card-background-color, #1c1c1c));
+        border-radius: 16px;
+        padding: 20px;
+        width: 240px;
+        max-width: 85vw;
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+      }
+      .popup-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 4px;
+      }
+      .popup-header ha-icon {
+        --mdc-icon-size: 22px;
+        color: var(--primary-text-color);
+        flex-shrink: 0;
+      }
+      .popup-title {
+        font-weight: 600;
+        font-size: 16px;
+        color: var(--primary-text-color);
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .popup-close-x {
+        border: none;
+        background: none;
+        cursor: pointer;
+        color: var(--secondary-text-color);
+        display: flex;
+        align-items: center;
+        flex-shrink: 0;
+      }
+      .popup-state {
+        color: var(--secondary-text-color);
+        font-size: 14px;
+        margin: 2px 0 18px 32px;
+      }
+      .popup-controls {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+      }
+      .popup-btn {
+        width: 56px;
+        height: 44px;
+        border-radius: 14px;
+        border: none;
+        background: rgba(var(--rgb-primary-text-color, 0, 0, 0), 0.08);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+      .popup-btn:active {
+        background: rgba(var(--rgb-primary-text-color, 0, 0, 0), 0.16);
+      }
+      .popup-btn ha-icon {
+        --mdc-icon-size: 20px;
+        color: var(--primary-text-color);
       }
     `;
   }
