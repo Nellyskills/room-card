@@ -770,7 +770,7 @@ class RoomCardEditor extends HTMLElement {
           delete entCfg.navigation_path;
           delete entCfg.entity;
           entCfg.icon = entCfg.icon || "mdi:lightbulb-group";
-          entCfg.entities = entCfg.entities || [];
+          entCfg.entities = entCfg.entities && entCfg.entities.length ? entCfg.entities : [""];
         } else {
           delete entCfg.icon_open;
           delete entCfg.icon_closed;
@@ -797,8 +797,35 @@ class RoomCardEditor extends HTMLElement {
       });
 
       if (entCfg.type === "group") {
-        topRow.style.gridTemplateColumns = "72px 40px";
+        if (!entCfg.entities || !entCfg.entities.length) entCfg.entities = [""];
+        topRow.style.gridTemplateColumns = "72px minmax(0, 1fr) 40px 40px";
+
+        const firstPicker = document.createElement("ha-entity-picker");
+        firstPicker.hass = this._hass;
+        firstPicker.value = entCfg.entities[0] || "";
+        firstPicker.includeDomains = ["light", "switch", "fan", "input_boolean", "siren"];
+        firstPicker.classList.add("entity-picker");
+        firstPicker.addEventListener("value-changed", (e) => {
+          entCfg.entities[0] = e.detail.value;
+          this._fire();
+        });
+
+        const addEntityBtn = document.createElement("button");
+        addEntityBtn.type = "button";
+        addEntityBtn.className = "add-entity-btn";
+        addEntityBtn.title = t(this._hass, "editor_add_entity");
+        const addEntityIcon = document.createElement("ha-icon");
+        addEntityIcon.setAttribute("icon", "mdi:plus");
+        addEntityBtn.appendChild(addEntityIcon);
+        addEntityBtn.addEventListener("click", () => {
+          entCfg.entities.push("");
+          this._fire();
+          this._render();
+        });
+
         topRow.appendChild(typeSelect);
+        topRow.appendChild(firstPicker);
+        topRow.appendChild(addEntityBtn);
         topRow.appendChild(removeBtn);
       } else {
         const entityPicker = document.createElement("ha-entity-picker");
@@ -823,6 +850,45 @@ class RoomCardEditor extends HTMLElement {
         topRow.appendChild(removeBtn);
       }
       item.appendChild(topRow);
+
+      if (entCfg.type === "group" && entCfg.entities.length > 1) {
+        for (let i = 1; i < entCfg.entities.length; i++) {
+          const extraRow = document.createElement("div");
+          extraRow.className = "ent-row";
+          extraRow.style.gridTemplateColumns = "72px minmax(0, 1fr) 40px";
+
+          const spacer = document.createElement("div");
+
+          const extraPicker = document.createElement("ha-entity-picker");
+          extraPicker.hass = this._hass;
+          extraPicker.value = entCfg.entities[i] || "";
+          extraPicker.includeDomains = ["light", "switch", "fan", "input_boolean", "siren"];
+          extraPicker.classList.add("entity-picker");
+          const extraIndex = i;
+          extraPicker.addEventListener("value-changed", (e) => {
+            entCfg.entities[extraIndex] = e.detail.value;
+            this._fire();
+          });
+
+          const extraRemoveBtn = document.createElement("button");
+          extraRemoveBtn.type = "button";
+          extraRemoveBtn.className = "remove-btn";
+          extraRemoveBtn.title = t(this._hass, "editor_remove");
+          const extraRemoveIcon = document.createElement("ha-icon");
+          extraRemoveIcon.setAttribute("icon", "mdi:delete-outline");
+          extraRemoveBtn.appendChild(extraRemoveIcon);
+          extraRemoveBtn.addEventListener("click", () => {
+            entCfg.entities.splice(extraIndex, 1);
+            this._fire();
+            this._render();
+          });
+
+          extraRow.appendChild(spacer);
+          extraRow.appendChild(extraPicker);
+          extraRow.appendChild(extraRemoveBtn);
+          item.appendChild(extraRow);
+        }
+      }
 
       const iconsRow = document.createElement("div");
       iconsRow.className = "ent-icons-row";
@@ -905,26 +971,6 @@ class RoomCardEditor extends HTMLElement {
         navField.wrap.classList.add("compact-field");
         navRow.appendChild(navField.wrap);
         item.appendChild(navRow);
-      }
-
-      if (entCfg.type === "group") {
-        const groupRow = document.createElement("div");
-        groupRow.className = "ent-nav-row";
-        const groupLabel = document.createElement("label");
-        groupLabel.className = "group-entities-label";
-        groupLabel.textContent = t(this._hass, "editor_group_entities");
-        const entitiesPicker = document.createElement("ha-entities-picker");
-        entitiesPicker.hass = this._hass;
-        entitiesPicker.value = entCfg.entities || [];
-        entitiesPicker.includeDomains = ["light", "switch", "fan", "input_boolean", "siren"];
-        entitiesPicker.classList.add("entities-multi-picker");
-        entitiesPicker.addEventListener("value-changed", (e) => {
-          entCfg.entities = e.detail.value || [];
-          this._fire();
-        });
-        groupRow.appendChild(groupLabel);
-        groupRow.appendChild(entitiesPicker);
-        item.appendChild(groupRow);
       }
 
       this._list.appendChild(item);
@@ -1036,7 +1082,7 @@ class RoomCardEditor extends HTMLElement {
 
   _syncHassRefs() {
     if (!this.shadowRoot) return;
-    this.shadowRoot.querySelectorAll("ha-icon-picker, ha-entity-picker, ha-entities-picker").forEach((el) => {
+    this.shadowRoot.querySelectorAll("ha-icon-picker, ha-entity-picker").forEach((el) => {
       el.hass = this._hass;
     });
   }
@@ -1118,15 +1164,6 @@ class RoomCardEditor extends HTMLElement {
       .ent-nav-row .compact-field {
         margin-top: 0;
       }
-      .group-entities-label {
-        display: block;
-        font-size: 12px;
-        color: var(--secondary-text-color);
-        margin-bottom: 4px;
-      }
-      .entities-multi-picker {
-        width: 100%;
-      }
       .drag-handle {
         flex: 0 0 72px;
         display: flex;
@@ -1184,6 +1221,21 @@ class RoomCardEditor extends HTMLElement {
         display: flex;
         align-items: center;
         justify-content: center;
+      }
+      .add-entity-btn {
+        width: 40px;
+        height: 40px;
+        border-radius: 8px;
+        border: none;
+        background: none;
+        cursor: pointer;
+        color: var(--primary-color);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .add-entity-btn:hover {
+        background: rgba(var(--rgb-primary-color, 3, 169, 244), 0.1);
       }
       .empty {
         color: var(--secondary-text-color);
