@@ -17,6 +17,7 @@ const TRANSLATIONS = {
     editor_type_light: "Licht",
     editor_type_cover: "Vorhang",
     editor_type_door: "Tür/Fenster",
+    editor_type_group: "Gruppe",
     editor_entity: "Entität",
     editor_icon_label: "Icon",
     editor_icon_open: "Icon (geöffnet)",
@@ -44,6 +45,7 @@ const TRANSLATIONS = {
     editor_type_light: "Light",
     editor_type_cover: "Cover",
     editor_type_door: "Door/Window",
+    editor_type_group: "Group",
     editor_entity: "Entity",
     editor_icon_label: "Icon",
     editor_icon_open: "Icon (open)",
@@ -279,8 +281,10 @@ class RoomCard extends HTMLElement {
 
   _toggle(entityId) {
     if (!entityId || !this._hass || !this._hass.states[entityId]) return;
-    const domain = entityId.split(".")[0];
-    this._hass.callService(domain, "toggle", { entity_id: entityId });
+    // "homeassistant.toggle" ist ein generischer Service, der für so gut wie
+    // jede toggle-fähige Domain funktioniert (light, switch, group, fan, ...),
+    // statt uns auf domain-spezifische Services verlassen zu müssen.
+    this._hass.callService("homeassistant", "toggle", { entity_id: entityId });
   }
 
   _update() {
@@ -703,9 +707,13 @@ class RoomCardEditor extends HTMLElement {
       const optDoor = document.createElement("option");
       optDoor.value = "door";
       optDoor.textContent = t(this._hass, "editor_type_door");
+      const optGroup = document.createElement("option");
+      optGroup.value = "group";
+      optGroup.textContent = t(this._hass, "editor_type_group");
       typeSelect.appendChild(optLight);
       typeSelect.appendChild(optCover);
       typeSelect.appendChild(optDoor);
+      typeSelect.appendChild(optGroup);
       typeSelect.value = entCfg.type;
       typeSelect.addEventListener("keydown", (e) => e.stopPropagation());
       typeSelect.addEventListener("change", (e) => {
@@ -720,6 +728,11 @@ class RoomCardEditor extends HTMLElement {
           entCfg.icon_open = entCfg.icon_open || "mdi:door-open";
           entCfg.icon_closed = entCfg.icon_closed || "mdi:door-closed";
           entCfg.navigation_path = entCfg.navigation_path || "";
+        } else if (entCfg.type === "group") {
+          delete entCfg.icon_open;
+          delete entCfg.icon_closed;
+          delete entCfg.navigation_path;
+          entCfg.icon = entCfg.icon || "mdi:lightbulb-group";
         } else {
           delete entCfg.icon_open;
           delete entCfg.icon_closed;
@@ -752,6 +765,8 @@ class RoomCardEditor extends HTMLElement {
       } else if (entCfg.type === "door") {
         entityPicker.includeDomains = ["binary_sensor"];
         entityPicker.includeDeviceClasses = ["door", "window", "garage_door", "opening"];
+      } else if (entCfg.type === "group") {
+        entityPicker.includeDomains = ["group"];
       } else {
         entityPicker.includeDomains = ["light", "switch"];
       }
