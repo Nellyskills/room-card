@@ -18,6 +18,7 @@ const TRANSLATIONS = {
     editor_type_cover: "Vorhang",
     editor_type_door: "Tür/Fenster",
     editor_type_group: "Gruppe",
+    editor_group_entities: "Entitäten (Licht, Schalter, ...)",
     editor_entity: "Entität",
     editor_icon_label: "Icon",
     editor_icon_open: "Icon (geöffnet)",
@@ -46,6 +47,7 @@ const TRANSLATIONS = {
     editor_type_cover: "Cover",
     editor_type_door: "Door/Window",
     editor_type_group: "Group",
+    editor_group_entities: "Entities (light, switch, ...)",
     editor_entity: "Entity",
     editor_icon_label: "Icon",
     editor_icon_open: "Icon (open)",
@@ -189,6 +191,11 @@ class RoomCard extends HTMLElement {
   }
 
   _handleClick(cfg) {
+    if (cfg.type === "group") {
+      if (!this._hass || !cfg.entities || !cfg.entities.length) return;
+      this._toggleGroup(cfg.entities);
+      return;
+    }
     if (!cfg.entity || !this._hass || !this._hass.states[cfg.entity]) return;
     if (cfg.type === "cover") {
       this._openCoverPopup(cfg);
@@ -287,6 +294,15 @@ class RoomCard extends HTMLElement {
     this._hass.callService("homeassistant", "toggle", { entity_id: entityId });
   }
 
+  _toggleGroup(entityIds) {
+    if (!this._hass || !entityIds || !entityIds.length) return;
+    // Ist mindestens eine der Entitäten an, schalten wir alle aus.
+    // Sind alle aus (oder nicht erreichbar), schalten wir alle ein.
+    const anyOn = entityIds.some((id) => this._hass.states[id]?.state === "on");
+    const service = anyOn ? "turn_off" : "turn_on";
+    this._hass.callService("homeassistant", service, { entity_id: entityIds });
+  }
+
   _update() {
     if (!this._hass || !this._built) return;
 
@@ -311,8 +327,24 @@ class RoomCard extends HTMLElement {
     }
 
     this._buttons.forEach(({ btn, icon, cfg }) => {
-      const stateObj = this._hass.states[cfg.entity];
       btn.classList.remove("on", "off", "unavailable", "cover-open", "door-open", "door-closed");
+
+      if (cfg.type === "group") {
+        icon.setAttribute("icon", cfg.icon || "mdi:lightbulb-group");
+        const ids = cfg.entities || [];
+        const states = ids.map((id) => this._hass.states[id]).filter(Boolean);
+        if (!ids.length || states.length === 0) {
+          btn.classList.add("unavailable");
+          btn.disabled = true;
+          return;
+        }
+        btn.disabled = false;
+        const anyOn = states.some((s) => s.state === "on");
+        btn.classList.add(anyOn ? "on" : "off");
+        return;
+      }
+
+      const stateObj = this._hass.states[cfg.entity];
 
       if (!stateObj || stateObj.state === "unavailable" || stateObj.state === "unknown") {
         icon.setAttribute(
@@ -721,25 +753,32 @@ class RoomCardEditor extends HTMLElement {
         if (entCfg.type === "cover") {
           delete entCfg.icon;
           delete entCfg.navigation_path;
+          delete entCfg.entities;
           entCfg.icon_open = entCfg.icon_open || "mdi:curtains";
           entCfg.icon_closed = entCfg.icon_closed || "mdi:curtains-closed";
+          entCfg.entity = "";
         } else if (entCfg.type === "door") {
           delete entCfg.icon;
+          delete entCfg.entities;
           entCfg.icon_open = entCfg.icon_open || "mdi:door-open";
           entCfg.icon_closed = entCfg.icon_closed || "mdi:door-closed";
           entCfg.navigation_path = entCfg.navigation_path || "";
+          entCfg.entity = "";
         } else if (entCfg.type === "group") {
           delete entCfg.icon_open;
           delete entCfg.icon_closed;
           delete entCfg.navigation_path;
+          delete entCfg.entity;
           entCfg.icon = entCfg.icon || "mdi:lightbulb-group";
+          entCfg.entities = entCfg.entities || [];
         } else {
           delete entCfg.icon_open;
           delete entCfg.icon_closed;
           delete entCfg.navigation_path;
+          delete entCfg.entities;
           entCfg.icon = entCfg.icon || "mdi:lightbulb";
+          entCfg.entity = "";
         }
-        entCfg.entity = "";
         this._fire();
         this._render();
       });
@@ -757,28 +796,32 @@ class RoomCardEditor extends HTMLElement {
         this._render();
       });
 
-      const entityPicker = document.createElement("ha-entity-picker");
-      entityPicker.hass = this._hass;
-      entityPicker.value = entCfg.entity || "";
-      if (entCfg.type === "cover") {
-        entityPicker.includeDomains = ["cover"];
-      } else if (entCfg.type === "door") {
-        entityPicker.includeDomains = ["binary_sensor"];
-        entityPicker.includeDeviceClasses = ["door", "window", "garage_door", "opening"];
-      } else if (entCfg.type === "group") {
-        entityPicker.includeDomains = ["group"];
+      if (entCfg.type === "group") {
+        topRow.style.gridTemplateColumns = "72px 40px";
+        topRow.appendChild(typeSelect);
+        topRow.appendChild(removeBtn);
       } else {
-        entityPicker.includeDomains = ["light", "switch"];
-      }
-      entityPicker.classList.add("entity-picker");
-      entityPicker.addEventListener("value-changed", (e) => {
-        entCfg.entity = e.detail.value;
-        this._fire();
-      });
+        const entityPicker = document.createElement("ha-entity-picker");
+        entityPicker.hass = this._hass;
+        entityPicker.value = entCfg.entity || "";
+        if (entCfg.type === "cover") {
+          entityPicker.includeDomains = ["cover"];
+        } else if (entCfg.type === "door") {
+          entityPicker.includeDomains = ["binary_sensor"];
+          entityPicker.includeDeviceClasses = ["door", "window", "garage_door", "opening"];
+        } else {
+          entityPicker.includeDomains = ["light", "switch"];
+        }
+        entityPicker.classList.add("entity-picker");
+        entityPicker.addEventListener("value-changed", (e) => {
+          entCfg.entity = e.detail.value;
+          this._fire();
+        });
 
-      topRow.appendChild(typeSelect);
-      topRow.appendChild(entityPicker);
-      topRow.appendChild(removeBtn);
+        topRow.appendChild(typeSelect);
+        topRow.appendChild(entityPicker);
+        topRow.appendChild(removeBtn);
+      }
       item.appendChild(topRow);
 
       const iconsRow = document.createElement("div");
@@ -835,7 +878,7 @@ class RoomCardEditor extends HTMLElement {
         iconLabel.textContent = t(this._hass, "editor_icon_label");
         const iconPicker = document.createElement("ha-icon-picker");
         iconPicker.hass = this._hass;
-        iconPicker.value = entCfg.icon || "mdi:lightbulb";
+        iconPicker.value = entCfg.icon || (entCfg.type === "group" ? "mdi:lightbulb-group" : "mdi:lightbulb");
         iconPicker.classList.add("icon-picker");
         iconPicker.addEventListener("value-changed", (e) => {
           entCfg.icon = e.detail.value;
@@ -862,6 +905,26 @@ class RoomCardEditor extends HTMLElement {
         navField.wrap.classList.add("compact-field");
         navRow.appendChild(navField.wrap);
         item.appendChild(navRow);
+      }
+
+      if (entCfg.type === "group") {
+        const groupRow = document.createElement("div");
+        groupRow.className = "ent-nav-row";
+        const groupLabel = document.createElement("label");
+        groupLabel.className = "group-entities-label";
+        groupLabel.textContent = t(this._hass, "editor_group_entities");
+        const entitiesPicker = document.createElement("ha-entities-picker");
+        entitiesPicker.hass = this._hass;
+        entitiesPicker.value = entCfg.entities || [];
+        entitiesPicker.includeDomains = ["light", "switch", "fan", "input_boolean", "siren"];
+        entitiesPicker.classList.add("entities-multi-picker");
+        entitiesPicker.addEventListener("value-changed", (e) => {
+          entCfg.entities = e.detail.value || [];
+          this._fire();
+        });
+        groupRow.appendChild(groupLabel);
+        groupRow.appendChild(entitiesPicker);
+        item.appendChild(groupRow);
       }
 
       this._list.appendChild(item);
@@ -973,7 +1036,7 @@ class RoomCardEditor extends HTMLElement {
 
   _syncHassRefs() {
     if (!this.shadowRoot) return;
-    this.shadowRoot.querySelectorAll("ha-icon-picker, ha-entity-picker").forEach((el) => {
+    this.shadowRoot.querySelectorAll("ha-icon-picker, ha-entity-picker, ha-entities-picker").forEach((el) => {
       el.hass = this._hass;
     });
   }
@@ -1054,6 +1117,15 @@ class RoomCardEditor extends HTMLElement {
       }
       .ent-nav-row .compact-field {
         margin-top: 0;
+      }
+      .group-entities-label {
+        display: block;
+        font-size: 12px;
+        color: var(--secondary-text-color);
+        margin-bottom: 4px;
+      }
+      .entities-multi-picker {
+        width: 100%;
       }
       .drag-handle {
         flex: 0 0 72px;
